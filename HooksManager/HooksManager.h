@@ -28,6 +28,6 @@ void InitializeOriginalFunctionPointers();
 
 extern "C"
 {
-	__declspec(dllexport) bool InstallGetActivationFactoryHook();
-	__declspec(dllexport) bool RemoveGetActivationFactoryHook();
+	__declspec(dllexport) bool InstallRoFunctionHooks();
+	__declspec(dllexport) bool RemoveRoFunctionHooks();
 }

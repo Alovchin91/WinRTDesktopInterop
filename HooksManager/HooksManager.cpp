@@ -42,7 +42,7 @@ void InitializeOriginalFunctionPointers()
 }
 
 
-bool InstallGetActivationFactoryHook()
+bool InstallRoFunctionHooks()
 {
 	DETOUR_VERIFY(::DetourTransactionBegin());
 
@@ -58,7 +58,7 @@ bool InstallGetActivationFactoryHook()
 }
 
 
-bool RemoveGetActivationFactoryHook()
+bool RemoveRoFunctionHooks()
 {
 	DETOUR_VERIFY(::DetourTransactionBegin());
 
