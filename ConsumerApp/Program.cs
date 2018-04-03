@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Runtime.InteropServices;
 
 namespace ConsumerApp
 {
@@ -10,23 +9,16 @@ namespace ConsumerApp
             Console.WriteLine("> Press ENTER to install hooks and use WinRT component.");
             Console.ReadLine();
 
-            if (InstallRoFunctionHooks())
-            {
-                UseWinRtComponent_DefaultCtor();
-                UseWinRtComponent_Factory();
-                UseWinRtComponent_StaticMethod();
-                UseWinRtComponent_Throwing();
+            var managedHooksManager = new ManagedHooksManager.HooksManager();
+            managedHooksManager.SetupHooks();
 
-                Console.WriteLine(Environment.NewLine + "> Now press ENTER to remove hooks and finish.");
-                Console.ReadLine();
+            UseWinRtComponent_DefaultCtor();
+            UseWinRtComponent_Factory();
+            UseWinRtComponent_StaticMethod();
+            UseWinRtComponent_Throwing();
 
-                RemoveRoFunctionHooks();
-            }
-            else
-            {
-                Console.WriteLine("Failed to install hooks. Press ENTER to finish.");
-                Console.ReadLine();
-            }
+            Console.WriteLine(Environment.NewLine + "> Now press ENTER to remove hooks and finish.");
+            Console.ReadLine();
         }
 
         static void UseWinRtComponent_DefaultCtor()
@@ -64,11 +56,5 @@ namespace ConsumerApp
                 Console.WriteLine("Greeting format was: " + myClass.Greeting);
             }
         }
-
-        [DllImport("HooksManager.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        static extern bool InstallRoFunctionHooks();
-
-        [DllImport("HooksManager.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        static extern bool RemoveRoFunctionHooks();
     }
 }

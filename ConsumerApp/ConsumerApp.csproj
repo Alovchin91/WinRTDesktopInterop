@@ -62,13 +62,9 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="$(SolutionDir)HooksManager\HooksManager.vcxproj">
-      <Project>{16C0490E-F130-4EEB-BCB8-886DE948042A}</Project>
-      <Name>HooksManager</Name>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-      <OutputItemType>Content</OutputItemType>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Targets>Build;BuiltProjectOutputGroup</Targets>
+    <ProjectReference Include="..\ManagedHooksManager\ManagedHooksManager.csproj">
+      <Project>{528e33fd-83e6-4946-ba69-547e40da91ef}</Project>
+      <Name>ManagedHooksManager</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
