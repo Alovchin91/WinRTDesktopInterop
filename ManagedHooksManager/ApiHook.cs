@@ -25,7 +25,7 @@ namespace ManagedHooksManager
             var imageExportDirectoryPtr = NativeApi.ImageDirectoryEntryToDataEx(
                 moduleBase,
                 true,
-                NativeApi.IMAGE_DIRECTORY_ENTRY_EXPORT,
+                NativeConstants.IMAGE_DIRECTORY_ENTRY_EXPORT,
                 out var _,
                 out var _);
 
@@ -33,7 +33,7 @@ namespace ManagedHooksManager
                 throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
             var imageExportDirectory = Marshal.PtrToStructure<
-                NativeApi.IMAGE_EXPORT_DIRECTORY>(imageExportDirectoryPtr);
+                NativeStructs.IMAGE_EXPORT_DIRECTORY>(imageExportDirectoryPtr);
 
             var moduleBaseAddress = moduleBase.ToInt64();
 
@@ -55,27 +55,27 @@ namespace ManagedHooksManager
 
                 var ordinal = nameOrdinalsA[i];
 
-                var addrOfFuncAddress = new IntPtr(
-                    moduleBaseAddress + imageExportDirectory.AddressOfFunctions + ordinal * Marshal.SizeOf<int>());
-
                 var newFuncPointer = Marshal.GetFunctionPointerForDelegate(newFunc);
 
                 int newFuncRva = IntPtr.Size == Marshal.SizeOf<int>()
-                    ? Convert.ToInt32(newFuncPointer.ToInt64() - moduleBaseAddress)
+                    ? newFuncPointer.ToInt32() - moduleBase.ToInt32()
                     : CreateX64Trampoline(moduleBaseAddress, newFuncPointer);
 
                 var eatFuncEntrySize = new IntPtr(Marshal.SizeOf<int>());
 
+                var addrOfFuncAddress = new IntPtr(
+                    moduleBaseAddress + imageExportDirectory.AddressOfFunctions + ordinal * Marshal.SizeOf<int>());
+
                 var protectResult = NativeApi.VirtualProtect(
                     addrOfFuncAddress,
                     eatFuncEntrySize,
-                    NativeApi.PAGE_WRITECOPY,
+                    NativeConstants.PAGE_WRITECOPY,
                     out var oldProtect);
 
                 if (!protectResult)
                     throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
-                Marshal.Copy(new int[] { newFuncRva }, 0, addrOfFuncAddress, 1);
+                Marshal.WriteInt32(addrOfFuncAddress, newFuncRva);
                 GCHandle.Alloc(newFunc);
 
                 protectResult = NativeApi.VirtualProtect(
@@ -83,6 +83,9 @@ namespace ManagedHooksManager
                     eatFuncEntrySize,
                     oldProtect,
                     out oldProtect);
+
+                if (!protectResult)
+                    throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
                 OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(
                     new IntPtr(moduleBaseAddress + funcAddrsA[ordinal]));
@@ -93,9 +96,7 @@ namespace ManagedHooksManager
 
         private static int CreateX64Trampoline(long moduleBaseAddress, IntPtr newFuncPointer)
         {
-            int newFuncRva = 0;
-
-            var memoryInfoStructSize = Marshal.SizeOf<NativeApi.MEMORY_BASIC_INFORMATION64>();
+            var memoryInfoStructSize = Marshal.SizeOf<NativeStructs.MEMORY_BASIC_INFORMATION64>();
             var memoryInfoStructPtr = Marshal.AllocHGlobal(memoryInfoStructSize);
 
             var trampolineAddress = IntPtr.Zero;
@@ -106,9 +107,7 @@ namespace ManagedHooksManager
             const long tryMemoryStep = 0x10000L;
 
             var tryMemoryBlock = moduleBaseAddress;
-
-            while (trampolineAddress == IntPtr.Zero &&
-                   tryMemoryBlock - moduleBaseAddress < virtual2Gb)
+            do
             {
                 tryMemoryBlock += tryMemoryStep;
 
@@ -123,21 +122,20 @@ namespace ManagedHooksManager
                     throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
                 var memoryInfo = Marshal.PtrToStructure<
-                    NativeApi.MEMORY_BASIC_INFORMATION64>(memoryInfoStructPtr);
+                    NativeStructs.MEMORY_BASIC_INFORMATION64>(memoryInfoStructPtr);
 
-                if (memoryInfo.State == NativeApi.MEM_FREE &&
+                if (memoryInfo.State == NativeConstants.MEM_FREE &&
                     memoryInfo.RegionSize >= trampoline.Length)
                 {
                     trampolineAddress = NativeApi.VirtualAlloc(
                         memoryBlockPtr,
                         trampolineSize,
-                        NativeApi.MEM_COMMIT | NativeApi.MEM_RESERVE,
-                        NativeApi.PAGE_READWRITE);
-
-                    if (trampolineAddress != IntPtr.Zero)
-                        break;
+                        NativeConstants.MEM_COMMIT | NativeConstants.MEM_RESERVE,
+                        NativeConstants.PAGE_READWRITE);
                 }
             }
+            while (trampolineAddress == IntPtr.Zero &&
+                   tryMemoryBlock - moduleBaseAddress < virtual2Gb);
 
             Marshal.FreeHGlobal(memoryInfoStructPtr);
 
@@ -145,12 +143,12 @@ namespace ManagedHooksManager
                 throw new InvalidOperationException("Failed to allocate space for trampoline in +/-2GB range.");
 
             Marshal.Copy(trampoline, 0, trampolineAddress, trampoline.Length);
-            newFuncRva = Convert.ToInt32(trampolineAddress.ToInt64() - moduleBaseAddress);
+            int newFuncRva = Convert.ToInt32(trampolineAddress.ToInt64() - moduleBaseAddress);
 
             var success = NativeApi.VirtualProtect(
                 trampolineAddress,
                 trampolineSize,
-                NativeApi.PAGE_EXECUTE_READ,
+                NativeConstants.PAGE_EXECUTE_READ,
                 out var oldProtect);
 
             if (!success)
