@@ -1,43 +1,13 @@
-﻿import "Windows.Foundation.idl";
-
-namespace WinRtComponent
+﻿namespace WinRtComponent
 {
-    runtimeclass NativeClass;
-
-    [version(1.0)]
-	[uuid(e4340830-6598-54a9-a5e6-e0f176d17a8f)]
-	[exclusiveto(NativeClass)]
-    interface INativeClass : IInspectable
-    {
-		[propget] HRESULT Greeting([out, retval] HSTRING* value);
-        HRESULT GreetUser([in] HSTRING userName, [out, retval] HSTRING* greeting);
-    };
-
-	[version(1.0)]
-	[uuid(e6f3aefe-535e-540f-8bb7-42f4b6ea82b2)]
-	[exclusiveto(NativeClass)]
-	interface INativeClassFactory : IInspectable
+	runtimeclass NativeClass : Windows.Foundation.IStringable
 	{
-		HRESULT CreateNativeClass([in] HSTRING greeting, [out, retval] NativeClass** value);
-	};
+		NativeClass();
+		NativeClass(String greeting);
 
-	[version(1.0)]
-	[uuid(25eb0601-3ed9-5002-9a0c-1ff68346c1ac)]
-	[exclusiveto(NativeClass)]
-	interface INativeClassStatics : IInspectable
-	{
-		HRESULT SetGreeting([in] NativeClass* instance, [in] HSTRING greeting);
-	};
+		String Greeting{ get; };
 
-    [version(1.0)]
-	[activatable(1.0)]
-	[activatable(INativeClassFactory, 1.0)]
-	[static(INativeClassStatics, 1.0)]
-	[marshaling_behavior(agile)]
-	[threading(both)]
-    runtimeclass NativeClass
-    {
-        [default] interface INativeClass;
-        interface Windows.Foundation.IStringable;
-    }
+		String GreetUser(String userName);
+		static void SetGreeting(NativeClass instance, String greeting);
+	}
 }

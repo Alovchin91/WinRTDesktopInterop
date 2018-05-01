@@ -24,7 +24,7 @@ namespace winrt::WinRtComponent::implementation
             throw hresult_invalid_argument();
 
         int capacity = _scwprintf(m_greeting.c_str(), userName.c_str()) + 1; // add space for terminating null
-		std::unique_ptr<wchar_t[]> buf(new wchar_t[capacity]);
+		std::unique_ptr<wchar_t[]> buf = std::make_unique<wchar_t[]>(capacity);
         int size = _snwprintf_s(buf.get(), capacity, _TRUNCATE, m_greeting.c_str(), userName.c_str());
 
         return hstring(buf.get(), size);
