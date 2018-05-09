@@ -21,11 +21,11 @@ namespace winrt::WinRtComponent::implementation
     hstring NativeClass::GreetUser(const hstring& userName)
     {
         if (userName.empty())
-            throw hresult_invalid_argument();
+            throw hresult_invalid_argument(L"User name should not be empty.");
 
-        int capacity = _scwprintf(m_greeting.c_str(), userName.c_str()) + 1; // add space for terminating null
-		std::unique_ptr<wchar_t[]> buf(new wchar_t[capacity]);
-        int size = _snwprintf_s(buf.get(), capacity, _TRUNCATE, m_greeting.c_str(), userName.c_str());
+        int capacity = _scwprintf(m_greeting.data(), userName.data()) + 1; // add space for terminating null
+		std::unique_ptr<wchar_t[]> buf = std::make_unique<wchar_t[]>(capacity);
+        int size = _snwprintf_s(buf.get(), capacity, _TRUNCATE, m_greeting.data(), userName.data());
 
         return hstring(buf.get(), size);
     }
