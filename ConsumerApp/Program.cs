@@ -1,4 +1,5 @@
 ﻿using System;
+//using System.Runtime.CompilerServices;
 
 namespace ConsumerApp
 {
@@ -11,15 +12,24 @@ namespace ConsumerApp
 
             var managedHooksManager = new ManagedHooksManager.HooksManager();
             managedHooksManager.SetupHooks();
+            managedHooksManager.RegisterWinRtType("WinRtComponent.NativeClass, WinRtComponent, ContentType=WindowsRuntime");
+            //RegisterWinRtTypes(managedHooksManager);
 
             UseWinRtComponent_DefaultCtor();
             UseWinRtComponent_Factory();
             UseWinRtComponent_StaticMethod();
             UseWinRtComponent_Throwing();
 
-            Console.WriteLine(Environment.NewLine + "> Now press ENTER to remove hooks and finish.");
+            Console.WriteLine();
+            Console.WriteLine("> Now press ENTER to remove hooks and finish.");
             Console.ReadLine();
         }
+
+        //[MethodImpl(MethodImplOptions.NoInlining)]
+        //static void RegisterWinRtTypes(ManagedHooksManager.HooksManager hooksManager)
+        //{
+        //    hooksManager.RegisterWinRtType<WinRtComponent.NativeClass>();
+        //}
 
         static void UseWinRtComponent_DefaultCtor()
         {

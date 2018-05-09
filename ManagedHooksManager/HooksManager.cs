@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -8,8 +9,48 @@ namespace ManagedHooksManager
 {
     public sealed class HooksManager
     {
+        private readonly ConcurrentDictionary<string, string> _winRtTypesRegistry;
+        private readonly string _executingAssemblyDir;
+
         private ApiHook<NativeApi.RoGetActivationFactory> _roGetActivationFactoryHook;
         private ApiHook<NativeApi.RoResolveNamespace> _roResolveNamespaceHook;
+
+        public HooksManager()
+        {
+            _winRtTypesRegistry = new ConcurrentDictionary<string, string>();
+            _executingAssemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        }
+
+        public void RegisterWinRtType(string assemblyQualifiedWinRtTypeName)
+        {
+            var winRtType = Type.GetType(assemblyQualifiedWinRtTypeName, throwOnError: true);
+            RegisterWinRtType(winRtType);
+        }
+
+        public void RegisterWinRtType<T>()
+        {
+            RegisterWinRtType(typeof(T));
+        }
+
+        public void RegisterWinRtType(Type winRtType)
+        {
+            if (winRtType == null)
+                throw new ArgumentNullException(nameof(winRtType));
+
+            var implementationPath = Path.ChangeExtension(winRtType.Assembly.Location, "dll");
+
+            _winRtTypesRegistry.AddOrUpdate(
+                winRtType.FullName,
+                typeName => implementationPath,
+                (typeName, registeredPath) =>
+                {
+                    System.Diagnostics.Debug.Fail(
+                      $"Type {typeName} already registered.",
+                      $"This type has already been registered with implementation file \"{registeredPath}\". " +
+                      $"Current registration attempt with file \"{implementationPath}\" will be ignored.");
+                    return registeredPath;
+                });
+        }
 
         public void SetupHooks()
         {
@@ -48,8 +89,7 @@ namespace ManagedHooksManager
                 return result;
             }
 
-            var assemblyDir = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
-            var assemblyDirHString = WindowsRuntimeMarshal.StringToHString(assemblyDir);
+            var assemblyDirHString = WindowsRuntimeMarshal.StringToHString(_executingAssemblyDir);
 
             packageGraphDirs = Marshal.AllocHGlobal(IntPtr.Size);
             packageGraphDirsCount = 1;
@@ -86,6 +126,40 @@ namespace ManagedHooksManager
             var result = roGetActivationFactory(activatableClassId, ref iid, out factory);
             if (result != NativeConstants.REGDB_E_CLASSNOTREG)
                 return result;
+
+            var activatableClassName = WindowsRuntimeMarshal.PtrToStringHString(activatableClassId);
+            if (!_winRtTypesRegistry.TryGetValue(activatableClassName, out var implementationPath))
+            {
+                System.Diagnostics.Debug.Fail($"Type {activatableClassName} is not registered.");
+                return result;
+            }
+
+            var implementationModule = NativeApi.LoadLibrary(implementationPath);
+            if (implementationModule == IntPtr.Zero)
+            {
+                System.Diagnostics.Debug.Fail($"Failed to load implementation file \"{implementationPath}\".");
+                return result;
+            }
+
+            var getActivationFactoryProc = NativeApi.GetProcAddress(implementationModule, "DllGetActivationFactory");
+            if (getActivationFactoryProc == IntPtr.Zero)
+            {
+                System.Diagnostics.Debug.Fail($"Implementation file \"{implementationPath}\" does not export DllGetActivationFactory function.");
+                return result;
+            }
+
+            var getActivationFactoryDelegate = Marshal.GetDelegateForFunctionPointer<
+                NativeApi.DllGetActivationFactory>(getActivationFactoryProc);
+
+            result = getActivationFactoryDelegate(activatableClassId, out var factoryObject);
+            if (result != 0)
+            {
+                System.Diagnostics.Debug.Fail($"Failed to get activation factory for type {activatableClassName}.");
+                return result;
+            }
+
+            result = Marshal.QueryInterface(factoryObject, ref iid, out factory);
+            Marshal.Release(factory);
 
             return result;
         }

@@ -24,6 +24,10 @@ namespace ManagedHooksManager
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr LoadLibrary([In] string ModuleName);
 
+        [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Ansi, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        public static extern IntPtr GetProcAddress([In] IntPtr Module, [In] string ProcName);
+
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -64,5 +68,10 @@ namespace ManagedHooksManager
             [Out] out IntPtr metaDataFilePaths,
             [Out] out int subNamespacesCount,
             [Out] out IntPtr subNamespaces);
+
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+        public delegate int DllGetActivationFactory(
+            [In] IntPtr activatableClassId,
+            [Out] out IntPtr factory);
     }
 }

@@ -26,8 +26,8 @@ namespace ManagedHooksManager
                 moduleBase,
                 true,
                 NativeConstants.IMAGE_DIRECTORY_ENTRY_EXPORT,
-                out var _,
-                out var _);
+                out _,
+                out _);
 
             if (imageExportDirectoryPtr == IntPtr.Zero)
                 throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
@@ -37,61 +37,76 @@ namespace ManagedHooksManager
 
             var moduleBaseAddress = moduleBase.ToInt64();
 
-            var namesRvasA = new int[imageExportDirectory.NumberOfNames];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNames), namesRvasA, 0, namesRvasA.Length);
+            if (!TryFindExportNameOrdinal(imageExportDirectory, moduleBaseAddress, out var nameOrdinal, out var originalFuncRva))
+                throw new EntryPointNotFoundException($"Export name {_exportName} could not be found in module {_moduleName}.");
 
-            var nameOrdinalsA = new short[imageExportDirectory.NumberOfNames];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNameOrdinals), nameOrdinalsA, 0, nameOrdinalsA.Length);
+            var newFuncPointer = Marshal.GetFunctionPointerForDelegate(newFunc);
 
-            var funcAddrsA = new int[imageExportDirectory.NumberOfFunctions];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfFunctions), funcAddrsA, 0, funcAddrsA.Length);
+            int newFuncRva = IntPtr.Size == Marshal.SizeOf<int>()
+                ? newFuncPointer.ToInt32() - moduleBase.ToInt32()
+                : CreateX64Trampoline(moduleBaseAddress, newFuncPointer);
+
+            var eatFuncEntrySize = new IntPtr(Marshal.SizeOf<int>());
+
+            var addrOfFuncAddress = new IntPtr(
+                moduleBaseAddress + imageExportDirectory.AddressOfFunctions + nameOrdinal * Marshal.SizeOf<int>());
+
+            var protectResult = NativeApi.VirtualProtect(
+                addrOfFuncAddress,
+                eatFuncEntrySize,
+                NativeConstants.PAGE_WRITECOPY,
+                out var oldProtect);
+
+            if (!protectResult)
+                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+
+            Marshal.WriteInt32(addrOfFuncAddress, newFuncRva);
+            GCHandle.Alloc(newFunc);
+
+            protectResult = NativeApi.VirtualProtect(
+                addrOfFuncAddress,
+                eatFuncEntrySize,
+                oldProtect,
+                out _);
+
+            if (!protectResult)
+                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+
+            OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(
+                new IntPtr(moduleBaseAddress + originalFuncRva));
+        }
+
+        private bool TryFindExportNameOrdinal(
+            NativeStructs.IMAGE_EXPORT_DIRECTORY imageExportDirectory,
+            long moduleBaseAddress,
+            out short nameOrdinal,
+            out int functionRva)
+        {
+            var nameRvas = new int[imageExportDirectory.NumberOfNames];
+            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNames), nameRvas, 0, nameRvas.Length);
+
+            var nameOrdinals = new short[imageExportDirectory.NumberOfNames];
+            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNameOrdinals), nameOrdinals, 0, nameOrdinals.Length);
+
+            var funcAddrs = new int[imageExportDirectory.NumberOfFunctions];
+            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfFunctions), funcAddrs, 0, funcAddrs.Length);
+
+            nameOrdinal = -1;
+            functionRva = -1;
 
             for (int i = 0; i < imageExportDirectory.NumberOfNames; i++)
             {
-                var funcName = Marshal.PtrToStringAnsi(new IntPtr(moduleBaseAddress + namesRvasA[i]));
+                var funcName = Marshal.PtrToStringAnsi(new IntPtr(moduleBaseAddress + nameRvas[i]));
 
-                if (!string.Equals(funcName, _exportName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var ordinal = nameOrdinalsA[i];
-
-                var newFuncPointer = Marshal.GetFunctionPointerForDelegate(newFunc);
-
-                int newFuncRva = IntPtr.Size == Marshal.SizeOf<int>()
-                    ? newFuncPointer.ToInt32() - moduleBase.ToInt32()
-                    : CreateX64Trampoline(moduleBaseAddress, newFuncPointer);
-
-                var eatFuncEntrySize = new IntPtr(Marshal.SizeOf<int>());
-
-                var addrOfFuncAddress = new IntPtr(
-                    moduleBaseAddress + imageExportDirectory.AddressOfFunctions + ordinal * Marshal.SizeOf<int>());
-
-                var protectResult = NativeApi.VirtualProtect(
-                    addrOfFuncAddress,
-                    eatFuncEntrySize,
-                    NativeConstants.PAGE_WRITECOPY,
-                    out var oldProtect);
-
-                if (!protectResult)
-                    throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
-
-                Marshal.WriteInt32(addrOfFuncAddress, newFuncRva);
-                GCHandle.Alloc(newFunc);
-
-                protectResult = NativeApi.VirtualProtect(
-                    addrOfFuncAddress,
-                    eatFuncEntrySize,
-                    oldProtect,
-                    out oldProtect);
-
-                if (!protectResult)
-                    throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
-
-                OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(
-                    new IntPtr(moduleBaseAddress + funcAddrsA[ordinal]));
-
-                break;
+                if (string.Equals(funcName, _exportName, StringComparison.OrdinalIgnoreCase))
+                {
+                    nameOrdinal = nameOrdinals[i];
+                    functionRva = funcAddrs[nameOrdinal];
+                    break;
+                }
             }
+
+            return nameOrdinal != -1;
         }
 
         private static int CreateX64Trampoline(long moduleBaseAddress, IntPtr newFuncPointer)
@@ -103,7 +118,6 @@ namespace ManagedHooksManager
             var trampoline = GetTrampolineInstructions(newFuncPointer);
             var trampolineSize = new IntPtr(trampoline.Length);
 
-            const long virtual2Gb = 2 * 1024 * 1024 * 1024L;
             const long tryMemoryStep = 0x10000L;
 
             var tryMemoryBlock = moduleBaseAddress;
@@ -135,7 +149,7 @@ namespace ManagedHooksManager
                 }
             }
             while (trampolineAddress == IntPtr.Zero &&
-                   tryMemoryBlock - moduleBaseAddress < virtual2Gb);
+                   tryMemoryBlock - moduleBaseAddress <= int.MaxValue);
 
             Marshal.FreeHGlobal(memoryInfoStructPtr);
 
@@ -145,13 +159,13 @@ namespace ManagedHooksManager
             Marshal.Copy(trampoline, 0, trampolineAddress, trampoline.Length);
             int newFuncRva = Convert.ToInt32(trampolineAddress.ToInt64() - moduleBaseAddress);
 
-            var success = NativeApi.VirtualProtect(
+            var protectResult = NativeApi.VirtualProtect(
                 trampolineAddress,
                 trampolineSize,
                 NativeConstants.PAGE_EXECUTE_READ,
-                out var oldProtect);
+                out _);
 
-            if (!success)
+            if (!protectResult)
                 throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
             return newFuncRva;
@@ -165,16 +179,15 @@ namespace ManagedHooksManager
             {
                 var trampoline = new byte[]
                 {
-                    0x50,                                                       // push   rax
-                    0x48, 0xB8, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, // movabs rax,0xcccccccccccccccc
-                    0x48, 0x87, 0x04, 0x24,                                     // xchg   QWORD PTR [rsp],rax
-                    0xC3                                                        // ret
+                    0x68, 0xcc, 0xcc, 0xcc, 0xcc,                       // push   dword low
+                    0xc7, 0x44, 0x24, 0x04, 0xcc, 0xcc, 0xcc, 0xcc,     // mov    DWORD PTR [rsp+4], dword high
+                    0xc3                                                // ret
                 };
 
                 var newFuncAddressBytes = BitConverter.GetBytes(newFuncPointer.ToInt64());
 
-                int newFuncAddressStartIndex = Array.IndexOf<byte>(trampoline, 0xcc);
-                Array.Copy(newFuncAddressBytes, 0, trampoline, newFuncAddressStartIndex, newFuncAddressBytes.Length);
+                Array.Copy(newFuncAddressBytes, 0, trampoline, 1, 4);
+                Array.Copy(newFuncAddressBytes, 4, trampoline, 9, 4);
 
                 return trampoline;
             }
