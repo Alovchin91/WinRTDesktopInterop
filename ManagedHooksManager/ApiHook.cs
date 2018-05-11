@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ManagedHooksManager
 {
     internal sealed class ApiHook<TDelegate>
     {
+        private const long TrampolineMemoryRegionSize = 0x10000L;
+
         private readonly string _moduleName;
         private readonly string _exportName;
 
@@ -116,14 +119,15 @@ namespace ManagedHooksManager
 
             var trampolineAddress = IntPtr.Zero;
             var trampoline = GetTrampolineInstructions(newFuncPointer);
-            var trampolineSize = new IntPtr(trampoline.Length);
 
-            const long tryMemoryStep = 0x10000L;
+            var memoryRegionSize = new IntPtr(TrampolineMemoryRegionSize);
 
             var tryMemoryBlock = moduleBaseAddress;
+            var tryMemoryBound = moduleBaseAddress + uint.MaxValue;
+
             do
             {
-                tryMemoryBlock += tryMemoryStep;
+                tryMemoryBlock += TrampolineMemoryRegionSize;
 
                 var memoryBlockPtr = new IntPtr(tryMemoryBlock);
 
@@ -139,34 +143,36 @@ namespace ManagedHooksManager
                     NativeStructs.MEMORY_BASIC_INFORMATION64>(memoryInfoStructPtr);
 
                 if (memoryInfo.State == NativeConstants.MEM_FREE &&
-                    memoryInfo.RegionSize >= trampoline.Length)
+                    memoryInfo.RegionSize >= TrampolineMemoryRegionSize)
                 {
                     trampolineAddress = NativeApi.VirtualAlloc(
                         memoryBlockPtr,
-                        trampolineSize,
+                        memoryRegionSize,
                         NativeConstants.MEM_COMMIT | NativeConstants.MEM_RESERVE,
-                        NativeConstants.PAGE_READWRITE);
+                        NativeConstants.PAGE_EXECUTE_READWRITE);
                 }
             }
-            while (trampolineAddress == IntPtr.Zero &&
-                   tryMemoryBlock - moduleBaseAddress <= int.MaxValue);
+            while (trampolineAddress == IntPtr.Zero && tryMemoryBlock <= tryMemoryBound);
 
             Marshal.FreeHGlobal(memoryInfoStructPtr);
 
             if (trampolineAddress == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to allocate space for trampoline in +/-2GB range.");
+                throw new InvalidOperationException("Failed to allocate space for trampoline.");
 
             Marshal.Copy(trampoline, 0, trampolineAddress, trampoline.Length);
-            int newFuncRva = Convert.ToInt32(trampolineAddress.ToInt64() - moduleBaseAddress);
+            int newFuncRva = unchecked((int)(trampolineAddress.ToInt64() - moduleBaseAddress));
 
             var protectResult = NativeApi.VirtualProtect(
                 trampolineAddress,
-                trampolineSize,
+                memoryRegionSize,
                 NativeConstants.PAGE_EXECUTE_READ,
                 out _);
 
             if (!protectResult)
                 throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+
+            var processHandle = Process.GetCurrentProcess().Handle;
+            NativeApi.FlushInstructionCache(processHandle, trampolineAddress, memoryRegionSize);
 
             return newFuncRva;
         }

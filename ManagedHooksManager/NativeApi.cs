@@ -52,6 +52,14 @@ namespace ManagedHooksManager
             [In] int AllocationType,
             [In] int Protect);
 
+        [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool FlushInstructionCache(
+            [In] IntPtr Process,
+            [In] IntPtr BaseAddress,
+            [In] IntPtr Size);
+
         [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         public delegate int RoGetActivationFactory(
             [In] IntPtr activatableClassId,
