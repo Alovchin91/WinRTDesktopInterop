@@ -10,7 +10,7 @@ namespace ConsumerApp
             Console.WriteLine("> Press ENTER to install hooks and use WinRT component.");
             Console.ReadLine();
 
-            var managedHooksManager = new ManagedHooksManager.HooksManager();
+            var managedHooksManager = new WinRTDesktopInterop.HooksManager();
             managedHooksManager.SetupHooks();
             managedHooksManager.RegisterWinRtType("WinRtComponent.NativeClass, WinRtComponent, ContentType=WindowsRuntime");
             //RegisterWinRtTypes(managedHooksManager);

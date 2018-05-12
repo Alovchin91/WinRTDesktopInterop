@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace ManagedHooksManager
+namespace WinRTDesktopInterop
 {
     namespace NativeStructs
     {

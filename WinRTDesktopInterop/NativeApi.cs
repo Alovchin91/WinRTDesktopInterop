@@ -2,13 +2,12 @@
 using System.Runtime.InteropServices;
 using System.Security;
 
-namespace ManagedHooksManager
+namespace WinRTDesktopInterop
 {
     [SuppressUnmanagedCodeSecurity]
     internal static class NativeApi
     {
         [DllImport("imagehlp.dll", CallingConvention = CallingConvention.StdCall, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr ImageDirectoryEntryToDataEx(
             [In] IntPtr Base,
             [In] [MarshalAs(UnmanagedType.U1)] bool MappedAsImage,
@@ -17,19 +16,15 @@ namespace ManagedHooksManager
             [Out] out IntPtr FoundHeader);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Unicode, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr GetModuleHandle([In] string ModuleName);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Unicode, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr LoadLibrary([In] string ModuleName);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, CharSet = CharSet.Ansi, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr GetProcAddress([In] IntPtr Module, [In] string ProcName);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool VirtualProtect(
             [In] IntPtr Address,
@@ -38,14 +33,12 @@ namespace ManagedHooksManager
             [Out] out int OldProtect);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr VirtualQuery(
             [In] IntPtr Address,
             [Out] IntPtr Buffer,
             [In] IntPtr Length);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern IntPtr VirtualAlloc(
             [In] IntPtr Address,
             [In] IntPtr Size,
@@ -53,7 +46,6 @@ namespace ManagedHooksManager
             [In] int Protect);
 
         [DllImport("kernel32.dll", CallingConvention = CallingConvention.Winapi, SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool FlushInstructionCache(
             [In] IntPtr Process,

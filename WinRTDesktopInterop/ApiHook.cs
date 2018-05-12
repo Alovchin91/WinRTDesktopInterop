@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace ManagedHooksManager
+namespace WinRTDesktopInterop
 {
     internal sealed class ApiHook<TDelegate>
     {

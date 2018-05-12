@@ -61,9 +61,9 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\ManagedHooksManager\ManagedHooksManager.csproj">
+    <ProjectReference Include="..\WinRTDesktopInterop\WinRTDesktopInterop.csproj">
       <Project>{528e33fd-83e6-4946-ba69-547e40da91ef}</Project>
-      <Name>ManagedHooksManager</Name>
+      <Name>WinRTDesktopInterop</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

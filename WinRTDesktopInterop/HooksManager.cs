@@ -5,7 +5,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 
-namespace ManagedHooksManager
+namespace WinRTDesktopInterop
 {
     public sealed class HooksManager
     {

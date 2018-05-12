@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace ManagedHooksManager
+namespace WinRTDesktopInterop
 {
     internal sealed class HookTrampoline
     {

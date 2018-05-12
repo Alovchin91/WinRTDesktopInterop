@@ -1,4 +1,4 @@
-﻿namespace ManagedHooksManager
+﻿namespace WinRTDesktopInterop
 {
     internal static class NativeConstants
     {
