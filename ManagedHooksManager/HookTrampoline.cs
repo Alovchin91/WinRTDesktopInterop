@@ -40,7 +40,7 @@ namespace ManagedHooksManager
                     new IntPtr(memoryInfoStructSize));
 
                 if (structSize == IntPtr.Zero)
-                    throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+                    Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error(), new IntPtr(-1));
 
                 var memoryInfo = Marshal.PtrToStructure<
                     NativeStructs.MEMORY_BASIC_INFORMATION64>(memoryInfoStructPtr);
@@ -72,7 +72,7 @@ namespace ManagedHooksManager
                 out _);
 
             if (!protectResult)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+                Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error(), new IntPtr(-1));
 
             var processHandle = Process.GetCurrentProcess().Handle;
             NativeApi.FlushInstructionCache(processHandle, trampolineAddress, memoryRegionSize);

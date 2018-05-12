@@ -22,7 +22,7 @@ namespace ManagedHooksManager
         {
             var moduleBase = NativeApi.LoadLibrary(_moduleName);
             if (moduleBase == IntPtr.Zero)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+                Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error(), new IntPtr(-1));
 
             var imageExportDirectoryPtr = NativeApi.ImageDirectoryEntryToDataEx(
                 moduleBase,
@@ -32,7 +32,7 @@ namespace ManagedHooksManager
                 out _);
 
             if (imageExportDirectoryPtr == IntPtr.Zero)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+                Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error(), new IntPtr(-1));
 
             var imageExportDirectory = Marshal.PtrToStructure<
                 NativeStructs.IMAGE_EXPORT_DIRECTORY>(imageExportDirectoryPtr);
@@ -40,32 +40,17 @@ namespace ManagedHooksManager
             if (!TryFindExportNameOrdinal(imageExportDirectory, moduleBase, out var nameOrdinal, out var originalFuncRva))
                 throw new EntryPointNotFoundException($"Export name {_exportName} could not be found in module {_moduleName}.");
 
+            var newFuncHandle = GCHandle.Alloc(newFunc);
+
             var newFuncPointer = Marshal.GetFunctionPointerForDelegate(newFunc);
             var newFuncRva = GetNewFunctionRva(moduleBase, newFuncPointer);
 
-            var eatFuncEntrySize = new IntPtr(sizeof(int));
-            var addrOfFuncAddress = moduleBase + imageExportDirectory.AddressOfFunctions + nameOrdinal * sizeof(int);
-
-            var protectResult = NativeApi.VirtualProtect(
-                addrOfFuncAddress,
-                eatFuncEntrySize,
-                NativeConstants.PAGE_WRITECOPY,
-                out var oldProtect);
-
-            if (!protectResult)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
-
-            Marshal.WriteInt32(addrOfFuncAddress, newFuncRva);
-            GCHandle.Alloc(newFunc);
-
-            protectResult = NativeApi.VirtualProtect(
-                addrOfFuncAddress,
-                eatFuncEntrySize,
-                oldProtect,
-                out _);
-
-            if (!protectResult)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
+            var addrOfFuncRva = moduleBase + imageExportDirectory.AddressOfFunctions + nameOrdinal * sizeof(int);
+            if (!TryWriteFunctionRva(addrOfFuncRva, newFuncRva))
+            {
+                newFuncHandle.Free();
+                Marshal.ThrowExceptionForHR(Marshal.GetHRForLastWin32Error(), new IntPtr(-1));
+            }
 
             OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(moduleBase + originalFuncRva);
         }
@@ -110,6 +95,30 @@ namespace ManagedHooksManager
 
             _trampoline = new HookTrampoline(moduleBase, newFuncAddress);
             return _trampoline.CreateX64Trampoline();
+        }
+
+        private bool TryWriteFunctionRva(IntPtr addrOfFuncAddress, int funcRva)
+        {
+            var eatFuncEntrySize = new IntPtr(sizeof(int));
+
+            var protectResult = NativeApi.VirtualProtect(
+                addrOfFuncAddress,
+                eatFuncEntrySize,
+                NativeConstants.PAGE_WRITECOPY,
+                out var oldProtect);
+
+            if (!protectResult)
+                return false;
+
+            Marshal.WriteInt32(addrOfFuncAddress, funcRva);
+
+            protectResult = NativeApi.VirtualProtect(
+                addrOfFuncAddress,
+                eatFuncEntrySize,
+                oldProtect,
+                out _);
+
+            return protectResult;
         }
     }
 }
