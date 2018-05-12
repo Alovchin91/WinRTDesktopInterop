@@ -1,15 +1,14 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ManagedHooksManager
 {
     internal sealed class ApiHook<TDelegate>
     {
-        private const long TrampolineMemoryRegionSize = 0x10000L;
-
         private readonly string _moduleName;
         private readonly string _exportName;
+
+        private HookTrampoline _trampoline;
 
         public ApiHook(string moduleName, string exportName)
         {
@@ -38,21 +37,14 @@ namespace ManagedHooksManager
             var imageExportDirectory = Marshal.PtrToStructure<
                 NativeStructs.IMAGE_EXPORT_DIRECTORY>(imageExportDirectoryPtr);
 
-            var moduleBaseAddress = moduleBase.ToInt64();
-
-            if (!TryFindExportNameOrdinal(imageExportDirectory, moduleBaseAddress, out var nameOrdinal, out var originalFuncRva))
+            if (!TryFindExportNameOrdinal(imageExportDirectory, moduleBase, out var nameOrdinal, out var originalFuncRva))
                 throw new EntryPointNotFoundException($"Export name {_exportName} could not be found in module {_moduleName}.");
 
             var newFuncPointer = Marshal.GetFunctionPointerForDelegate(newFunc);
+            var newFuncRva = GetNewFunctionRva(moduleBase, newFuncPointer);
 
-            int newFuncRva = IntPtr.Size == Marshal.SizeOf<int>()
-                ? newFuncPointer.ToInt32() - moduleBase.ToInt32()
-                : CreateX64Trampoline(moduleBaseAddress, newFuncPointer);
-
-            var eatFuncEntrySize = new IntPtr(Marshal.SizeOf<int>());
-
-            var addrOfFuncAddress = new IntPtr(
-                moduleBaseAddress + imageExportDirectory.AddressOfFunctions + nameOrdinal * Marshal.SizeOf<int>());
+            var eatFuncEntrySize = new IntPtr(sizeof(int));
+            var addrOfFuncAddress = moduleBase + imageExportDirectory.AddressOfFunctions + nameOrdinal * sizeof(int);
 
             var protectResult = NativeApi.VirtualProtect(
                 addrOfFuncAddress,
@@ -75,31 +67,30 @@ namespace ManagedHooksManager
             if (!protectResult)
                 throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
 
-            OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(
-                new IntPtr(moduleBaseAddress + originalFuncRva));
+            OriginalFunction = Marshal.GetDelegateForFunctionPointer<TDelegate>(moduleBase + originalFuncRva);
         }
 
         private bool TryFindExportNameOrdinal(
             NativeStructs.IMAGE_EXPORT_DIRECTORY imageExportDirectory,
-            long moduleBaseAddress,
+            IntPtr moduleBase,
             out short nameOrdinal,
             out int functionRva)
         {
             var nameRvas = new int[imageExportDirectory.NumberOfNames];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNames), nameRvas, 0, nameRvas.Length);
+            Marshal.Copy(moduleBase + imageExportDirectory.AddressOfNames, nameRvas, 0, nameRvas.Length);
 
             var nameOrdinals = new short[imageExportDirectory.NumberOfNames];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfNameOrdinals), nameOrdinals, 0, nameOrdinals.Length);
+            Marshal.Copy(moduleBase + imageExportDirectory.AddressOfNameOrdinals, nameOrdinals, 0, nameOrdinals.Length);
 
             var funcAddrs = new int[imageExportDirectory.NumberOfFunctions];
-            Marshal.Copy(new IntPtr(moduleBaseAddress + imageExportDirectory.AddressOfFunctions), funcAddrs, 0, funcAddrs.Length);
+            Marshal.Copy(moduleBase + imageExportDirectory.AddressOfFunctions, funcAddrs, 0, funcAddrs.Length);
 
             nameOrdinal = -1;
             functionRva = -1;
 
             for (int i = 0; i < imageExportDirectory.NumberOfNames; i++)
             {
-                var funcName = Marshal.PtrToStringAnsi(new IntPtr(moduleBaseAddress + nameRvas[i]));
+                var funcName = Marshal.PtrToStringAnsi(moduleBase + nameRvas[i]);
 
                 if (string.Equals(funcName, _exportName, StringComparison.OrdinalIgnoreCase))
                 {
@@ -112,93 +103,13 @@ namespace ManagedHooksManager
             return nameOrdinal != -1;
         }
 
-        private static int CreateX64Trampoline(long moduleBaseAddress, IntPtr newFuncPointer)
+        private int GetNewFunctionRva(IntPtr moduleBase, IntPtr newFuncAddress)
         {
-            var memoryInfoStructSize = Marshal.SizeOf<NativeStructs.MEMORY_BASIC_INFORMATION64>();
-            var memoryInfoStructPtr = Marshal.AllocHGlobal(memoryInfoStructSize);
+            if (IntPtr.Size == sizeof(int))
+                return newFuncAddress.ToInt32() - moduleBase.ToInt32();
 
-            var trampolineAddress = IntPtr.Zero;
-            var trampoline = GetTrampolineInstructions(newFuncPointer);
-
-            var memoryRegionSize = new IntPtr(TrampolineMemoryRegionSize);
-
-            var tryMemoryBlock = moduleBaseAddress;
-            var tryMemoryBound = moduleBaseAddress + uint.MaxValue;
-
-            do
-            {
-                tryMemoryBlock += TrampolineMemoryRegionSize;
-
-                var memoryBlockPtr = new IntPtr(tryMemoryBlock);
-
-                var structSize = NativeApi.VirtualQuery(
-                    memoryBlockPtr,
-                    memoryInfoStructPtr,
-                    new IntPtr(memoryInfoStructSize));
-
-                if (structSize == IntPtr.Zero)
-                    throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
-
-                var memoryInfo = Marshal.PtrToStructure<
-                    NativeStructs.MEMORY_BASIC_INFORMATION64>(memoryInfoStructPtr);
-
-                if (memoryInfo.State == NativeConstants.MEM_FREE &&
-                    memoryInfo.RegionSize >= TrampolineMemoryRegionSize)
-                {
-                    trampolineAddress = NativeApi.VirtualAlloc(
-                        memoryBlockPtr,
-                        memoryRegionSize,
-                        NativeConstants.MEM_COMMIT | NativeConstants.MEM_RESERVE,
-                        NativeConstants.PAGE_EXECUTE_READWRITE);
-                }
-            }
-            while (trampolineAddress == IntPtr.Zero && tryMemoryBlock <= tryMemoryBound);
-
-            Marshal.FreeHGlobal(memoryInfoStructPtr);
-
-            if (trampolineAddress == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to allocate space for trampoline.");
-
-            Marshal.Copy(trampoline, 0, trampolineAddress, trampoline.Length);
-            int newFuncRva = unchecked((int)(trampolineAddress.ToInt64() - moduleBaseAddress));
-
-            var protectResult = NativeApi.VirtualProtect(
-                trampolineAddress,
-                memoryRegionSize,
-                NativeConstants.PAGE_EXECUTE_READ,
-                out _);
-
-            if (!protectResult)
-                throw Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
-
-            var processHandle = Process.GetCurrentProcess().Handle;
-            NativeApi.FlushInstructionCache(processHandle, trampolineAddress, memoryRegionSize);
-
-            return newFuncRva;
-        }
-
-        private static byte[] GetTrampolineInstructions(IntPtr newFuncPointer)
-        {
-            var processorArchitecture = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE");
-
-            if (string.Equals(processorArchitecture, "amd64", StringComparison.OrdinalIgnoreCase))
-            {
-                var trampoline = new byte[]
-                {
-                    0x68, 0xcc, 0xcc, 0xcc, 0xcc,                       // push   dword low
-                    0xc7, 0x44, 0x24, 0x04, 0xcc, 0xcc, 0xcc, 0xcc,     // mov    DWORD PTR [rsp+4], dword high
-                    0xc3                                                // ret
-                };
-
-                var newFuncAddressBytes = BitConverter.GetBytes(newFuncPointer.ToInt64());
-
-                Array.Copy(newFuncAddressBytes, 0, trampoline, 1, 4);
-                Array.Copy(newFuncAddressBytes, 4, trampoline, 9, 4);
-
-                return trampoline;
-            }
-
-            throw new PlatformNotSupportedException($"Processor architecture {processorArchitecture} is not supported.");
+            _trampoline = new HookTrampoline(moduleBase, newFuncAddress);
+            return _trampoline.CreateX64Trampoline();
         }
     }
 }
